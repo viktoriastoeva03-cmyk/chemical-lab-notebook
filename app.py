@@ -7,9 +7,9 @@ from datetime import datetime
 st.set_page_config(page_title="Електрохимия & Лабораторен Дневник", layout="wide")
 
 st.title("🧪 Електрохимия & Лабораторен Дневник")
-st.write("Проследяемост на опити (Какво, Защо, Кога), Органични структури, Канали на Абрин и Батерии")
+st.write("Масово импортиране на до 100 файла, Автоматично сортиране (Li/Na) и Управление")
 
-# Файлове за локално съхранение на компютъра
+# Файлове за съхранение
 EXP_FILE = "experiments_v2.csv"
 BATTERIES_FILE = "batteries_v2.csv"
 ABRIN_FILE = "abrin_channels.csv"
@@ -17,215 +17,264 @@ ABRIN_FILE = "abrin_channels.csv"
 def load_data(file_path, columns):
     if os.path.exists(file_path):
         try:
-            return pd.read_csv(file_path, encoding='utf-8-sig')
+            df = pd.read_csv(file_path, encoding='utf-8-sig')
         except Exception:
-            return pd.read_csv(file_path, encoding='utf-8')
+            df = pd.read_csv(file_path, encoding='utf-8')
+        df = df.dropna(how='all').fillna("")
+        return df
     return pd.DataFrame(columns=columns)
 
+def categorize_battery(row):
+    material = str(row.get("Тип клетка / Състав", "")).lower()
+    name = str(row.get("Име на Папка/Батерия", "")).lower()
+    text = name + " " + material
+    
+    if "na" in text or "sodium" in text or "натри" in text:
+        chem = "Na-ion (Натриева)"
+    elif "li" in text or "lithium" in text or "лити" in text:
+        chem = "Li-ion (Литиева)"
+    else:
+        chem = "Други / Неопределен"
+
+    date_str = str(row.get("Дата на сглобяване", ""))
+    year = date_str.split("-")[0] if "-" in date_str and len(date_str.split("-")[0]) == 4 else "2026"
+
+    return chem, year
+
+# Зареждане на данните
 df_exp = load_data(EXP_FILE, ["ID", "Кога (Дата)", "Име на Батерия/Клетка", "Изследовател", "Заглавие", "Какво е направено", "Защо е направено (Цел)", "Органична формула (SMILES/LaTeX)", "Параметри"])
 df_batt = load_data(BATTERIES_FILE, ["Име на Папка/Батерия", "Дата на сглобяване", "Партиден №", "Тип клетка / Състав", "Цел / Назначение"])
 df_abrin = load_data(ABRIN_FILE, ["Канал", "Име на Клетка / Батерия", "Забележка", "Дата на поставяне"])
 
 menu = st.sidebar.radio("📋 Модули", [
+    "📁 Папки: Клетки / Батерии & Сортиране",
     "🔌 Абрин: Разпределение по Канали",
-    "📁 Папки: Клетки / Батерии",
     "📝 Нов Лабораторен Опит",
     "📚 Пълен Архив (Редакция & Изтриване)",
     "📊 Анализ & Графики"
 ])
 
-# 1. МОДУЛ: АБРИН (КАНАЛИ С ЦВЕТОВЕ И ИЗЧИСТВАНЕ)
-if menu == "🔌 Абрин: Разпределение по Канали":
-    st.header("🔌 Разпределение на клетките по канали в Абрин")
-    st.write("Зелен цвят = Свободен канал | Червен цвят = Зает канал")
-
-    abrin_dict = {}
-    if not df_abrin.empty:
-        for idx, row in df_abrin.iterrows():
-            abrin_dict[str(row["Канал"])] = row
-
-    st.subheader("📍 Текущо състояние на каналите")
+# 1. МОДУЛ: ПАПКИ И БАТЕРИИ (МАСОВО КАЧВАНЕ НА ДО 100 ФАЙЛА)
+if menu == "📁 Папки: Клетки / Батерии & Сортиране":
+    st.header("📁 Батерии & Клетки (Масово качване на до 100 файла)")
     
-    # Показваме каналите в 2 реда по 4 кутийки
+    tab1, tab2 = st.tabs(["➕ Ръчно добавяне", "📂 Масово качване (до 100 CSV/Excel файла)"])
+    
+    with tab1:
+        with st.form("battery_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                b_name = st.text_input("Име на Клетката", "Cell_Li_NMC_01")
+                b_date = st.date_input("Дата на сглобяване", datetime.now())
+            with col2:
+                b_num = st.text_input("Партиден №", "BATT-2026-001")
+                b_type = st.text_input("Материал / Състав", "Li-ion / NMC / Графит")
+            with col3:
+                b_target = st.text_area("Цел", "Тест при висок ток")
+                
+            submit_b = st.form_submit_button("📁 Запази клетка")
+            if submit_b:
+                new_b = pd.DataFrame([{
+                    "Име на Папка/Батерия": b_name,
+                    "Дата на сглобяване": b_date.strftime("%Y-%m-%d"),
+                    "Партиден №": b_num,
+                    "Тип клетка / Състав": b_type,
+                    "Цел / Назначение": b_target
+                }])
+                df_batt_updated = pd.concat([df_batt, new_b], ignore_index=True)
+                df_batt_updated.to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
+                st.success(f"Клетката '{b_name}' беше запазена!")
+                st.rerun()
+
+    with tab2:
+        st.subheader("📥 Качете до 100 Excel или CSV файла наведнъж")
+        st.write("Можете да маркирате и пуснете множество файлове от компютъра си.")
+        
+        # Разрешаваме до 100 файла наведнъж
+        uploaded_files = st.file_uploader(
+            "Изберете файлове от компютъра (CSV/XLSX)", 
+            type=["csv", "xlsx"], 
+            accept_multiple_files=True
+        )
+        
+        if uploaded_files:
+            st.info(f"Избрани файлове за обработка: **{len(uploaded_files)}**")
+            
+            if st.button("🚀 Добави всички качени файлове към базата данни"):
+                new_entries = []
+                for file in uploaded_files:
+                    try:
+                        # Заглавието на файла става име на клетката, ако липсват стандартни колони
+                        base_name = os.path.splitext(file.name)[0]
+                        
+                        if file.name.endswith('.csv'):
+                            temp_df = pd.read_csv(file)
+                        else:
+                            temp_df = pd.read_excel(file)
+                        
+                        # Проверка дали в качения файл има нашите колони
+                        if "Име на Папка/Батерия" in temp_df.columns:
+                            for _, row in temp_df.iterrows():
+                                new_entries.append({
+                                    "Име на Папка/Батерия": row.get("Име на Папка/Батерия", base_name),
+                                    "Дата на сглобяване": row.get("Дата на сглобяване", datetime.now().strftime("%Y-%m-%d")),
+                                    "Партиден №": row.get("Партиден №", "IMPORTED"),
+                                    "Тип клетка / Състав": row.get("Тип клетка / Състав", base_name),
+                                    "Цел / Назначение": row.get("Цел / Назначение", f"Импортиран от {file.name}")
+                                })
+                        else:
+                            # Ако файлът е сурови данни от апаратура, правим нов запис с името на файла
+                            new_entries.append({
+                                "Име на Папка/Батерия": base_name,
+                                "Дата на сглобяване": datetime.now().strftime("%Y-%m-%d"),
+                                "Партиден №": "RAW-DATA",
+                                "Тип клетка / Състав": base_name,
+                                "Цел / Назначение": f"Данни от файл: {file.name}"
+                            })
+                    except Exception as e:
+                        st.warning(f"Грешка при четене на файла {file.name}: {e}")
+                
+                if new_entries:
+                    imported_df = pd.DataFrame(new_entries)
+                    df_batt_updated = pd.concat([df_batt, imported_df], ignore_index=True).drop_duplicates(subset=["Име на Папка/Батерия"])
+                    df_batt_updated.to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
+                    st.success(f"Успешно обработени и добавени {len(new_entries)} клетки/файла!")
+                    st.rerun()
+
+    st.markdown("---")
+    st.subheader("🔍 Сортиран архив на клетките")
+    
+    df_batt_clean = df_batt[df_batt["Име на Папка/Батерия"].astype(str).str.strip() != ""].copy()
+    
+    if not df_batt_clean.empty:
+        df_batt_clean[["Химия (Li/Na)", "Година"]] = df_batt_clean.apply(categorize_battery, axis=1, result_type="expand")
+
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            chem_filter = st.selectbox("Филтър по Химия", ["Всички", "Li-ion (Литиева)", "Na-ion (Натриева)", "Други / Неопределен"])
+        with col_f2:
+            years_list = ["Всички"] + sorted([y for y in df_batt_clean["Година"].unique() if y], reverse=True)
+            year_filter = st.selectbox("Филтър по Година", years_list)
+        with col_f3:
+            search_mat = st.text_input("Търси по материал/име", "")
+
+        filtered_batt = df_batt_clean.copy()
+        if chem_filter != "Всички":
+            filtered_batt = filtered_batt[filtered_batt["Химия (Li/Na)"] == chem_filter]
+        if year_filter != "Всички":
+            filtered_batt = filtered_batt[filtered_batt["Година"] == year_filter]
+        if search_mat:
+            filtered_batt = filtered_batt[
+                filtered_batt["Тип клетка / Състав"].astype(str).str.contains(search_mat, case=False, na=False) |
+                filtered_batt["Име на Папка/Батерия"].astype(str).str.contains(search_mat, case=False, na=False)
+            ]
+
+        for idx, row in filtered_batt.iterrows():
+            name_disp = row['Име на Папка/Батерия'] if row['Име на Папка/Батерия'] else "Без име"
+            date_disp = row['Дата на сглобяване'] if row['Дата на сглобяване'] else "Няма дата"
+            comp_disp = row['Тип клетка / Състав'] if row['Тип клетка / Състав'] else "Няма информация"
+            
+            col_info, col_del = st.columns([6, 1])
+            with col_info:
+                st.markdown(f"🔋 **{name_disp}** | 🧪 **{row['Химия (Li/Na)']}** | 📅 **{date_disp}** (Година: {row['Година']}) | ⚙️ **Състав:** {comp_disp}")
+            with col_del:
+                if st.button("🗑️ Изтрий", key=f"del_cell_{idx}"):
+                    df_batt_updated = df_batt.drop(idx)
+                    df_batt_updated.to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
+                    st.success("Изтрито!")
+                    st.rerun()
+    else:
+        st.info("Все още няма качени или създадени клетки.")
+
+# 2. МОДУЛ: АБРИН
+elif menu == "🔌 Абрин: Разпределение по Канали":
+    st.header("🔌 Разпределение по канали в Абрин")
+    abrin_dict = {str(row["Канал"]): row for idx, row in df_abrin.iterrows()} if not df_abrin.empty else {}
+    
     for row_idx in range(2):
         cols = st.columns(4)
         for col_idx in range(4):
             ch_num = row_idx * 4 + col_idx + 1
             ch_key = f"Канал {ch_num}"
-            
             with cols[col_idx]:
                 if ch_key in abrin_dict and str(abrin_dict[ch_key]["Име на Клетка / Батерия"]).strip() != "":
                     cell_info = abrin_dict[ch_key]
-                    st.error(f"### 🔴 {ch_key}\n\n**ЗАЕТ от:**\n\n🔋 **{cell_info['Име на Клетка / Батерия']}**\n\n📅 {cell_info['Дата на поставяне']}\n\n⚙️ {cell_info['Забележка']}")
-                    
-                    # Бутон за премахване/освобождаване на канала
-                    if st.button(f"🗑️ Освободи {ch_key}", key=f"clear_{ch_num}"):
+                    st.error(f"### 🔴 {ch_key}\n\n**ЗАЕТ от:**\n\n🔋 **{cell_info['Име на Клетка / Батерия']}**\n\n⚙️ {cell_info['Забележка']}")
+                    if st.button(f"🗑️ Освободи", key=f"clear_{ch_num}"):
                         df_abrin_updated = df_abrin[df_abrin["Канал"] != ch_key]
                         df_abrin_updated.to_csv(ABRIN_FILE, index=False, encoding='utf-8-sig')
-                        st.success(f"{ch_key} беше освободен!")
                         st.rerun()
                 else:
-                    st.success(f"### 🟢 {ch_key}\n\n**Свободен**\n\n(Готов за поставяне на клетка)")
+                    st.success(f"### 🟢 {ch_key}\n\n**Свободен**")
 
     st.markdown("---")
-    st.subheader("⚙️ Поставяне на клетка в канал")
     with st.form("abrin_form"):
         col1, col2 = st.columns(2)
         with col1:
             channel_select = st.selectbox("Изберете Канал", [f"Канал {i}" for i in range(1, 9)])
             cell_options = df_batt["Име на Папка/Батерия"].tolist() if not df_batt.empty else ["Няма създадени клетки"]
-            selected_cell = st.selectbox("Изберете Клетка/Батерия", cell_options)
+            selected_cell = st.selectbox("Изберете Клетка", cell_options)
         with col2:
-            ch_notes = st.text_input("Параметри (Ток, Волтаж, Режим)", "0.1 mA, 2.8-4.2V")
-            ch_date = st.date_input("Дата на пускане", datetime.now())
-            
-        submit_abrin = st.form_submit_button("Запази в канала")
-        if submit_abrin:
-            if selected_cell == "Няма създадени клетки":
-                st.error("Първо създайте клетка от раздел 'Папки: Клетки / Батерии'!")
-            else:
+            ch_notes = st.text_input("Параметри", "0.1 mA, 2.8-4.2V")
+            ch_date = st.date_input("Дата", datetime.now())
+        if st.form_submit_button("Запази в канала"):
+            if selected_cell != "Няма създадени клетки":
                 df_abrin_clean = df_abrin[df_abrin["Канал"] != channel_select]
-                new_ch = pd.DataFrame([{
-                    "Канал": channel_select,
-                    "Име на Клетка / Батерия": selected_cell,
-                    "Забележка": ch_notes,
-                    "Дата на поставяне": ch_date.strftime("%Y-%m-%d")
-                }])
-                df_abrin_updated = pd.concat([df_abrin_clean, new_ch], ignore_index=True)
-                df_abrin_updated.to_csv(ABRIN_FILE, index=False, encoding='utf-8-sig')
-                st.success(f"Клетка '{selected_cell}' е зачислена към {channel_select}!")
+                new_ch = pd.DataFrame([{"Канал": channel_select, "Име на Клетка / Батерия": selected_cell, "Забележка": ch_notes, "Дата на поставяне": ch_date.strftime("%Y-%m-%d")}])
+                pd.concat([df_abrin_clean, new_ch], ignore_index=True).to_csv(ABRIN_FILE, index=False, encoding='utf-8-sig')
                 st.rerun()
-
-# 2. МОДУЛ: ПАПКИ И БАТЕРИИ
-elif menu == "📁 Папки: Клетки / Батерии":
-    st.header("📁 Папки (Клетки и Батерии)")
-    
-    with st.form("battery_form"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            b_name = st.text_input("Име на Клетката / Батерията", "Cell_NMC_01")
-            b_date = st.date_input("Дата на сглобяване", datetime.now())
-        with col2:
-            b_num = st.text_input("Номер / Партиден №", "BATT-2026-001")
-            b_type = st.text_input("Тип клетка / Активен материал", "Органичен катод")
-        with col3:
-            b_target = st.text_area("Цел / Назначение", "Тестване на нов електролит")
-            
-        submit_b = st.form_submit_button("📁 Създай Папка")
-        
-        if submit_b:
-            new_b = pd.DataFrame([{
-                "Име на Папка/Батерия": b_name,
-                "Дата на сглобяване": b_date.strftime("%Y-%m-%d"),
-                "Партиден №": b_num,
-                "Тип клетка / Състав": b_type,
-                "Цел / Назначение": b_target
-            }])
-            df_batt_updated = pd.concat([df_batt, new_b], ignore_index=True)
-            df_batt_updated.to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
-            st.success(f"Папката '{b_name}' бе създадена!")
-            st.rerun()
-
-    st.subheader("📚 Налични папки")
-    if not df_batt.empty:
-        for idx, row in df_batt.iterrows():
-            col_info, col_del = st.columns([5, 1])
-            with col_info:
-                st.write(f"📁 **{row['Име на Папка/Батерия']}** | Партида: {row['Партиден №']} | Дата: {row['Дата на сглобяване']} | Състав: {row['Тип клетка / Състав']}")
-            with col_del:
-                if st.button("🗑️ Изтрий", key=f"del_batt_{idx}"):
-                    df_batt_updated = df_batt.drop(idx)
-                    df_batt_updated.to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
-                    st.success("Папката е изтрита!")
-                    st.rerun()
 
 # 3. МОДУЛ: НОВ ОПИТ
 elif menu == "📝 Нов Лабораторен Опит":
-    st.header("📝 Записване на Нов Опит")
-    
+    st.header("📝 Нов Опит")
     with st.form("exp_form"):
         col1, col2 = st.columns(2)
         with col1:
-            e_date = st.date_input("Кога (Дата)", datetime.now())
+            e_date = st.date_input("Дата", datetime.now())
             e_researcher = st.text_input("Изследовател", "Студент / Научен ръководител")
             cell_options = df_batt["Име на Папка/Батерия"].tolist() if not df_batt.empty else ["Общ опит"]
-            e_battery = st.selectbox("Към коя папка се записва?", cell_options)
+            e_battery = st.selectbox("Към папка", cell_options)
         with col2:
-            e_title = st.text_input("Заглавие на опита")
-            e_params = st.text_input("Параметри (Температура, pH)", "25°C, 1 M LiPF6")
-            
-        e_why = st.text_area("🎯 ЗАЩО е направен опита (Цел / Хипотеза)", height=80)
-        e_how = st.text_area("🛠️ КАКВО е направено (Процедура и наблюдения)", height=100)
-        e_chem = st.text_input("Химична формула / Уравнение (LaTeX)", "H2SO4 + 2NaOH -> Na2SO4 + 2H2O")
-        
-        submit_exp = st.form_submit_button("💾 Запази опита")
-        
-        if submit_exp:
-            exp_id = datetime.now().strftime("%Y%m%d%H%M%S")
-            new_e = pd.DataFrame([{
-                "ID": exp_id,
-                "Кога (Дата)": e_date.strftime("%Y-%m-%d"),
-                "Име на Батерия/Клетка": e_battery,
-                "Изследовател": e_researcher,
-                "Заглавие": e_title,
-                "Какво е направено": e_how,
-                "Защо е направено (Цел)": e_why,
-                "Органична формула (SMILES/LaTeX)": e_chem,
-                "Параметри": e_params
-            }])
-            df_exp_updated = pd.concat([df_exp, new_e], ignore_index=True)
-            df_exp_updated.to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
-            st.success("Опитът е записан локално!")
+            e_title = st.text_input("Заглавие")
+            e_params = st.text_input("Параметри", "25°C")
+        e_why = st.text_area("🎯 ЗАЩО (Цел)", height=80)
+        e_how = st.text_area("🛠️ КАКВО (Процедура)", height=100)
+        e_chem = st.text_input("Формула (LaTeX)", "LiCoO2")
+        if st.form_submit_button("💾 Запази опита"):
+            new_e = pd.DataFrame([{"ID": datetime.now().strftime("%Y%m%d%H%M%S"), "Кога (Дата)": e_date.strftime("%Y-%m-%d"), "Име на Батерия/Клетка": e_battery, "Изследовател": e_researcher, "Заглавие": e_title, "Какво е направено": e_how, "Защо е направено (Цел)": e_why, "Органична формула (SMILES/LaTeX)": e_chem, "Параметри": e_params}])
+            pd.concat([df_exp, new_e], ignore_index=True).to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
+            st.success("Опитът бе записан!")
             st.rerun()
 
-# 4. МОДУЛ: ПЪЛЕН АРХИВ (ИЗЧИСТВАНЕ НА ГРЕШКИ)
+# 4. МОДУЛ: АРХИВ
 elif menu == "📚 Пълен Архив (Редакция & Изтриване)":
-    st.header("📚 Архив на опитите (С възможност за премахване)")
-    
+    st.header("📚 Архив")
     if not df_exp.empty:
         cell_filter = st.selectbox("Филтър по папка", ["Всички"] + df_exp["Име на Батерия/Клетка"].unique().tolist())
         filtered_df = df_exp if cell_filter == "Всички" else df_exp[df_exp["Име на Батерия/Клетка"] == cell_filter]
-        
         for idx, row in filtered_df.iterrows():
             with st.expander(f"📅 {row['Кога (Дата)']} | 🔋 {row['Име на Батерия/Клетка']} | 📌 {row['Заглавие']}"):
                 st.write(f"**Изследовател:** {row['Изследовател']}")
                 st.write(f"**🎯 ЗАЩО:** {row['Защо е направено (Цел)']}")
                 st.write(f"**🛠️ КАКВО:** {row['Какво е направено']}")
-                st.write(f"**⚙️ Параметри:** {row['Параметри']}")
-                if pd.notna(row['Органична формула (SMILES/LaTeX)']):
-                    st.write("**🧪 Формула:**")
-                    st.latex(row['Органична формула (SMILES/LaTeX)'])
-                
-                # Бутон за изтриване на грешен опит
-                if st.button(f"❌ Изтрий този опит", key=f"del_exp_{idx}"):
-                    df_exp_updated = df_exp.drop(idx)
-                    df_exp_updated.to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
-                    st.success("Грешният опит беше премахнат от файла!")
+                if st.button(f"❌ Изтрий опита", key=f"del_exp_{idx}"):
+                    df_exp.drop(idx).to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
                     st.rerun()
-    else:
-        st.warning("Няма намерени опити.")
 
 # 5. МОДУЛ: ГРАФИКИ
 elif menu == "📊 Анализ & Графики":
-    st.header("📊 Чертане на Графики")
-    
+    st.header("📊 Графики")
     col_x, col_y = st.columns(2)
     with col_x:
-        x_label = st.text_input("Ос X", "Капацитет (mAh/g)")
         x_values = st.text_input("Стойности X", "0, 20, 50, 80, 110, 140, 150")
     with col_y:
-        y_label = st.text_input("Ос Y", "Напрежение (V)")
         y_values = st.text_input("Стойности Y", "4.2, 4.0, 3.8, 3.6, 3.4, 3.0, 2.5")
-        
     if st.button("Генерирай Крива"):
         try:
             x = [float(i.strip()) for i in x_values.split(",")]
             y = [float(i.strip()) for i in y_values.split(",")]
             fig, ax = plt.subplots()
-            ax.plot(x, y, marker='s', color='r', linestyle='-')
-            ax.set_xlabel(x_label)
-            ax.set_ylabel(y_label)
-            ax.set_title("Зарядна / Разрядна Крива")
+            ax.plot(x, y, marker='s', color='r')
             ax.grid(True)
             st.pyplot(fig)
         except Exception:
