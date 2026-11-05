@@ -2,10 +2,12 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+from datetime import datetime
 
-st.set_page_config(page_title="Лабораторен Дневник", layout="wide")
+st.set_page_config(page_title="Лабораторен Дневник (Офлайн)", layout="wide")
 
 st.title("🧪 Електрохимия & Лабораторен Дневник")
+st.caption("🌐 Офлайн режим: Записването на опити работи 100% без интернет")
 
 FILES_DIR = "uploaded_files"
 os.makedirs(FILES_DIR, exist_ok=True)
@@ -14,7 +16,7 @@ EXP_FILE = "experiments_v2.csv"
 BATTERIES_FILE = "batteries_v2.csv"
 ABRIN_FILE = "abrin_channels.csv"
 
-# --- БЛОК ЗА АВТОМАТИЧНА СИНХРОНИЗАЦИЯ С GITHUB ---
+# --- БЛОК ЗА СИНХРОНИЗАЦИЯ (РАБОТИ КОГАТО ИМА ИНТЕРНЕТ) ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("🌐 Облачна синхронизация")
 
@@ -22,7 +24,6 @@ if st.sidebar.button("🔄 Синхронизирай данните с 1 кли
     try:
         import git
         repo = git.Repo(os.getcwd())
-        # Добавяне на променените CSV файлове и качения архив
         repo.index.add([EXP_FILE, BATTERIES_FILE, ABRIN_FILE])
         for root, dirs, files in os.walk(FILES_DIR):
             for f in files:
@@ -33,15 +34,18 @@ if st.sidebar.button("🔄 Синхронизирай данните с 1 кли
         origin.push()
         st.sidebar.success("✅ Успешно синхронизирано! Сайтът в интернет се обновява...")
     except Exception as e:
-        st.sidebar.error(f"Грешка при синхронизация: {e}\n(Уверете се, че имате интернет връзка)")
-# ---------------------------------------------------
+        st.sidebar.error("Няма интернет връзка или Git не е настроен. Данните остават сигурно запазени на лаптопа!")
 
+# Безопасно зареждане на данните офлайн
 def load_data(file_path, columns):
     if os.path.exists(file_path):
         try:
             df = pd.read_csv(file_path, encoding='utf-8-sig')
         except Exception:
-            df = pd.read_csv(file_path, encoding='utf-8')
+            try:
+                df = pd.read_csv(file_path, encoding='utf-8')
+            except Exception:
+                return pd.DataFrame(columns=columns)
         return df.dropna(how='all').fillna("")
     return pd.DataFrame(columns=columns)
 
@@ -61,20 +65,72 @@ def categorize_battery(row):
     year = date_str.split("-")[0] if "-" in date_str and len(date_str.split("-")[0]) == 4 else "2026"
     return chem, year
 
+# Зареждане на базите данни
 df_exp = load_data(EXP_FILE, ["ID", "Кога (Дата)", "Име на Батерия/Клетка", "Изследовател", "Заглавие", "Какво е направено", "Защо е направено (Цел)", "Органична формула (SMILES/LaTeX)", "Параметри"])
 df_batt = load_data(BATTERIES_FILE, ["Име на Папка/Батерия", "Дата на сглобяване", "Партиден №", "Тип клетка / Състав", "Цел / Назначение", "Оригинален Файл"])
 df_abrin = load_data(ABRIN_FILE, ["Канал", "Име на Клетка / Батерия", "Забележка", "Дата на поставяне"])
 
 menu = st.sidebar.radio("📋 Модули", [
+    "📝 Нов Лабораторен Опит (ОФЛАЙН)",
     "📁 Папки: Клетки / Батерии & Сортиране",
     "🔌 Абрин: Разпределение по Канали",
-    "📝 Нов Лабораторен Опит",
     "📚 Пълен Архив (Редакция & Изтриване)",
     "📊 Анализ & Графики"
 ])
 
-# 1. МОДУЛ: ПАПКИ И БАТЕРИИ
-if menu == "📁 Папки: Клетки / Батерии & Сортиране":
+# 1. МОДУЛ: НОВ ЛАБОРАТОРЕН ОПИТ (ОФЛАЙН ЗАЩИТЕН)
+if menu == "📝 Нов Лабораторен Опит (ОФЛАЙН)":
+    st.header("📝 Записване на Нов Опит (Офлайн режим)")
+    st.info("💡 Вси опити се записват веднага във файла 'experiments_v2.csv' на лаптопа ви.")
+    
+    # Вземаме списък с наличните папки/клетки
+    available_cells = []
+    if not df_batt.empty and "Име на Папка/Батерия" in df_batt.columns:
+        available_cells = [c for c in df_batt["Име на Папка/Батерия"].tolist() if str(c).strip() != ""]
+    
+    if not available_cells:
+        available_cells = ["Общ опит / Без конкретна клетка"]
+
+    with st.form("exp_form_offline"):
+        col1, col2 = st.columns(2)
+        with col1:
+            e_date = st.date_input("Кога (Дата)", datetime.now())
+            e_researcher = st.text_input("Изследовател", "Студент / Научен ръководител")
+            e_battery = st.selectbox("Към коя клетка/папка е опита?", available_cells)
+        with col2:
+            e_title = st.text_input("Заглавие на опита", "Степен на зареждане / CV тест")
+            e_params = st.text_input("Параметри (Температура, pH, Електролит)", "25°C, 1 M LiPF6")
+            
+        e_why = st.text_area("🎯 ЗАЩО е направен опита (Цел / Хипотеза)", height=90)
+        e_how = st.text_area("🛠️ КАКВО е направено (Процедура и наблюдения)", height=110)
+        e_chem = st.text_input("Химична формула / Уравнение (LaTeX/SMILES)", "LiCoO2 -> Li1-xCoO2 + xLi+ + xe-")
+        
+        submit_exp = st.form_submit_button("💾 Запази опита на лаптопа")
+        
+        if submit_exp:
+            if not e_title.strip():
+                st.error("Моля въведете заглавие на опита!")
+            else:
+                exp_id = datetime.now().strftime("%Y%m%d%H%M%S")
+                new_e = pd.DataFrame([{
+                    "ID": exp_id,
+                    "Кога (Дата)": e_date.strftime("%Y-%m-%d"),
+                    "Име на Батерия/Клетка": e_battery,
+                    "Изследовател": e_researcher,
+                    "Заглавие": e_title,
+                    "Какво е направено": e_how,
+                    "Защо е направено (Цел)": e_why,
+                    "Органична формула (SMILES/LaTeX)": e_chem,
+                    "Параметри": e_params
+                }])
+                
+                df_exp_updated = pd.concat([df_exp, new_e], ignore_index=True)
+                df_exp_updated.to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
+                st.success(f"✅ Опитът '{e_title}' бе успешно записан локално!")
+                st.rerun()
+
+# 2. МОДУЛ: ПАПКИ И БАТЕРИИ
+elif menu == "📁 Папки: Клетки / Батерии & Сортиране":
     st.header("📁 Батерии & Клетки")
     tab1, tab2 = st.tabs(["➕ Ръчно добавяне", "📂 Масово качване (до 100 CSV/Excel файла)"])
     
@@ -83,7 +139,7 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
             col1, col2, col3 = st.columns(3)
             with col1:
                 b_name = st.text_input("Име на Клетката", "Cell_Li_NMC_01")
-                b_date = st.date_input("Дата на сглобяване", pd.Timestamp.now())
+                b_date = st.date_input("Дата на сглобяване", datetime.now())
             with col2:
                 b_num = st.text_input("Партиден №", "BATT-2026-001")
                 b_type = st.text_input("Материал / Състав", "Li-ion / NMC / Графит")
@@ -100,7 +156,7 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
                     "Оригинален Файл": ""
                 }])
                 pd.concat([df_batt, new_b], ignore_index=True).to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
-                st.success(f"Клетката '{b_name}' е запазена локално!")
+                st.success(f"Клетката '{b_name}' бе запазена локално!")
                 st.rerun()
 
     with tab2:
@@ -117,7 +173,7 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
                     
                     new_entries.append({
                         "Име на Папка/Батерия": base_name,
-                        "Дата на сглобяване": pd.Timestamp.now().strftime("%Y-%m-%d"),
+                        "Дата на сглобяване": datetime.now().strftime("%Y-%m-%d"),
                         "Партиден №": "OFFLINE-DATA",
                         "Тип клетка / Състав": base_name,
                         "Цел / Назначение": f"Файл: {file.name}",
@@ -171,10 +227,8 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
                 if st.button("🗑️ Изтрий", key=f"del_cell_{idx}"):
                     df_batt.drop(idx).to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
                     st.rerun()
-    else:
-        st.info("Все още няма качени или създадени клетки.")
 
-# 2. МОДУЛ: АБРИН
+# 3. МОДУЛ: АБРИН
 elif menu == "🔌 Абрин: Разпределение по Канали":
     st.header("🔌 Канали в Абрин")
     abrin_dict = {str(row["Канал"]): row for idx, row in df_abrin.iterrows()} if not df_abrin.empty else {}
@@ -202,7 +256,7 @@ elif menu == "🔌 Абрин: Разпределение по Канали":
             selected_cell = st.selectbox("Изберете Клетка", cell_options)
         with col2:
             ch_notes = st.text_input("Параметри", "0.1 mA, 2.8-4.2V")
-            ch_date = st.date_input("Дата", pd.Timestamp.now())
+            ch_date = st.date_input("Дата", datetime.now())
         if st.form_submit_button("Запази в канала"):
             if selected_cell != "Няма създадени клетки":
                 df_abrin_clean = df_abrin[df_abrin["Канал"] != channel_select]
@@ -210,42 +264,30 @@ elif menu == "🔌 Абрин: Разпределение по Канали":
                 pd.concat([df_abrin_clean, new_ch], ignore_index=True).to_csv(ABRIN_FILE, index=False, encoding='utf-8-sig')
                 st.rerun()
 
-# 3. МОДУЛ: НОВ ОПИТ
-elif menu == "📝 Нов Лабораторен Опит":
-    st.header("📝 Нов Опит")
-    with st.form("exp_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            e_date = st.date_input("Дата", pd.Timestamp.now())
-            e_researcher = st.text_input("Изследовател", "Студент / Научен ръководител")
-            cell_options = df_batt["Име на Папка/Батерия"].tolist() if not df_batt.empty else ["Общ опит"]
-            e_battery = st.selectbox("Към папка", cell_options)
-        with col2:
-            e_title = st.text_input("Заглавие")
-            e_params = st.text_input("Параметри", "25°C")
-        e_why = st.text_area("🎯 ЗАЩО (Цел)", height=80)
-        e_how = st.text_area("🛠️ КАКВО (Процедура)", height=100)
-        e_chem = st.text_input("Формула (LaTeX)", "LiCoO2")
-        if st.form_submit_button("💾 Запази опита"):
-            new_e = pd.DataFrame([{"ID": pd.Timestamp.now().strftime("%Y%m%d%H%M%S"), "Кога (Дата)": e_date.strftime("%Y-%m-%d"), "Име на Батерия/Клетка": e_battery, "Изследовател": e_researcher, "Заглавие": e_title, "Какво е направено": e_how, "Защо е направено (Цел)": e_why, "Органична формула (SMILES/LaTeX)": e_chem, "Параметри": e_params}])
-            pd.concat([df_exp, new_e], ignore_index=True).to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
-            st.success("Опитът бе записан локално!")
-            st.rerun()
-
-# 4. МОДУЛ: АРХИВ
+# 4. МОДУЛ: ПЪЛЕН АРХИВ
 elif menu == "📚 Пълен Архив (Редакция & Изтриване)":
-    st.header("📚 Архив")
+    st.header("📚 Архив на опитите")
     if not df_exp.empty:
-        cell_filter = st.selectbox("Филтър по папка", ["Всички"] + df_exp["Име на Батерия/Клетка"].unique().tolist())
+        cell_filter = st.selectbox("Филтър по клетка", ["Всички"] + [c for c in df_exp["Име на Батерия/Клетка"].unique() if c])
         filtered_df = df_exp if cell_filter == "Всички" else df_exp[df_exp["Име на Батерия/Клетка"] == cell_filter]
+        
         for idx, row in filtered_df.iterrows():
             with st.expander(f"📅 {row['Кога (Дата)']} | 🔋 {row['Име на Батерия/Клетка']} | 📌 {row['Заглавие']}"):
                 st.write(f"**Изследовател:** {row['Изследовател']}")
-                st.write(f"**🎯 ЗАЩО:** {row['Защо е направено (Цел)']}")
-                st.write(f"**🛠️ КАКВО:** {row['Какво е направено']}")
+                st.write(f"**🎯 ЗАЩО (Цел):** {row['Защо е направено (Цел)']}")
+                st.write(f"**🛠️ КАКВО (Процедура):** {row['Какво е направено']}")
+                st.write(f"**⚙️ Параметри:** {row['Параметри']}")
+                if pd.notna(row['Органична формула (SMILES/LaTeX)']) and str(row['Органична формула (SMILES/LaTeX)']).strip() != "":
+                    st.write("**🧪 Формула:**")
+                    st.code(row['Органична формула (SMILES/LaTeX)'])
+                
                 if st.button(f"❌ Изтрий опита", key=f"del_exp_{idx}"):
-                    df_exp.drop(idx).to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
+                    df_exp_updated = df_exp.drop(idx)
+                    df_exp_updated.to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
+                    st.success("Опитът бе изтрит!")
                     st.rerun()
+    else:
+        st.info("Все още няма записани лабораторни опити.")
 
 # 5. МОДУЛ: ГРАФИКИ
 elif menu == "📊 Анализ & Графики":
