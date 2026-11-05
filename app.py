@@ -7,9 +7,13 @@ from datetime import datetime
 st.set_page_config(page_title="Електрохимия & Лабораторен Дневник", layout="wide")
 
 st.title("🧪 Електрохимия & Лабораторен Дневник")
-st.write("Масово импортиране на до 100 файла, Автоматично сортиране (Li/Na) и Управление")
+st.write("Масово качване на файлове, Свали/Отвори оригинален Excel файл от телефон и Управление")
 
-# Файлове за съхранение
+# Папка за съхранение на оригиналните качени Excel/CSV файлове
+FILES_DIR = "uploaded_files"
+os.makedirs(FILES_DIR, exist_ok=True)
+
+# Файлове за базата данни
 EXP_FILE = "experiments_v2.csv"
 BATTERIES_FILE = "batteries_v2.csv"
 ABRIN_FILE = "abrin_channels.csv"
@@ -43,7 +47,7 @@ def categorize_battery(row):
 
 # Зареждане на данните
 df_exp = load_data(EXP_FILE, ["ID", "Кога (Дата)", "Име на Батерия/Клетка", "Изследовател", "Заглавие", "Какво е направено", "Защо е направено (Цел)", "Органична формула (SMILES/LaTeX)", "Параметри"])
-df_batt = load_data(BATTERIES_FILE, ["Име на Папка/Батерия", "Дата на сглобяване", "Партиден №", "Тип клетка / Състав", "Цел / Назначение"])
+df_batt = load_data(BATTERIES_FILE, ["Име на Папка/Батерия", "Дата на сглобяване", "Партиден №", "Тип клетка / Състав", "Цел / Назначение", "Оригинален Файл"])
 df_abrin = load_data(ABRIN_FILE, ["Канал", "Име на Клетка / Батерия", "Забележка", "Дата на поставяне"])
 
 menu = st.sidebar.radio("📋 Модули", [
@@ -54,9 +58,9 @@ menu = st.sidebar.radio("📋 Модули", [
     "📊 Анализ & Графики"
 ])
 
-# 1. МОДУЛ: ПАПКИ И БАТЕРИИ (МАСОВО КАЧВАНЕ НА ДО 100 ФАЙЛА)
+# 1. МОДУЛ: ПАПКИ И БАТЕРИИ + КАЧВАНЕ НА ОРИГИНАЛНИ ФАЙЛОВЕ
 if menu == "📁 Папки: Клетки / Батерии & Сортиране":
-    st.header("📁 Батерии & Клетки (Масово качване на до 100 файла)")
+    st.header("📁 Батерии & Клетки (Масово качване + Запазване на Excel файлове)")
     
     tab1, tab2 = st.tabs(["➕ Ръчно добавяне", "📂 Масово качване (до 100 CSV/Excel файла)"])
     
@@ -79,7 +83,8 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
                     "Дата на сглобяване": b_date.strftime("%Y-%m-%d"),
                     "Партиден №": b_num,
                     "Тип клетка / Състав": b_type,
-                    "Цел / Назначение": b_target
+                    "Цел / Назначение": b_target,
+                    "Оригинален Файл": ""
                 }])
                 df_batt_updated = pd.concat([df_batt, new_b], ignore_index=True)
                 df_batt_updated.to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
@@ -88,9 +93,8 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
 
     with tab2:
         st.subheader("📥 Качете до 100 Excel или CSV файла наведнъж")
-        st.write("Можете да маркирате и пуснете множество файлове от компютъра си.")
+        st.write("Качените файлове се запазват в системата и могат да се свалят от телефон/компютър по всяко време.")
         
-        # Разрешаваме до 100 файла наведнъж
         uploaded_files = st.file_uploader(
             "Изберете файлове от компютъра (CSV/XLSX)", 
             type=["csv", "xlsx"], 
@@ -104,15 +108,18 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
                 new_entries = []
                 for file in uploaded_files:
                     try:
-                        # Заглавието на файла става име на клетката, ако липсват стандартни колони
                         base_name = os.path.splitext(file.name)[0]
+                        saved_path = os.path.join(FILES_DIR, file.name)
+                        
+                        # Запазваме оригиналния файл във папката uploaded_files
+                        with open(saved_path, "wb") as f:
+                            f.write(file.getbuffer())
                         
                         if file.name.endswith('.csv'):
-                            temp_df = pd.read_csv(file)
+                            temp_df = pd.read_csv(saved_path)
                         else:
-                            temp_df = pd.read_excel(file)
+                            temp_df = pd.read_excel(saved_path)
                         
-                        # Проверка дали в качения файл има нашите колони
                         if "Име на Папка/Батерия" in temp_df.columns:
                             for _, row in temp_df.iterrows():
                                 new_entries.append({
@@ -120,29 +127,30 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
                                     "Дата на сглобяване": row.get("Дата на сглобяване", datetime.now().strftime("%Y-%m-%d")),
                                     "Партиден №": row.get("Партиден №", "IMPORTED"),
                                     "Тип клетка / Състав": row.get("Тип клетка / Състав", base_name),
-                                    "Цел / Назначение": row.get("Цел / Назначение", f"Импортиран от {file.name}")
+                                    "Цел / Назначение": row.get("Цел / Назначение", f"Импортиран от {file.name}"),
+                                    "Оригинален Файл": file.name
                                 })
                         else:
-                            # Ако файлът е сурови данни от апаратура, правим нов запис с името на файла
                             new_entries.append({
                                 "Име на Папка/Батерия": base_name,
                                 "Дата на сглобяване": datetime.now().strftime("%Y-%m-%d"),
                                 "Партиден №": "RAW-DATA",
                                 "Тип клетка / Състав": base_name,
-                                "Цел / Назначение": f"Данни от файл: {file.name}"
+                                "Цел / Назначение": f"Данни от файл: {file.name}",
+                                "Оригинален Файл": file.name
                             })
                     except Exception as e:
-                        st.warning(f"Грешка при четене на файла {file.name}: {e}")
+                        st.warning(f"Грешка при обработка на {file.name}: {e}")
                 
                 if new_entries:
                     imported_df = pd.DataFrame(new_entries)
                     df_batt_updated = pd.concat([df_batt, imported_df], ignore_index=True).drop_duplicates(subset=["Име на Папка/Батерия"])
                     df_batt_updated.to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
-                    st.success(f"Успешно обработени и добавени {len(new_entries)} клетки/файла!")
+                    st.success(f"Успешно добавени {len(new_entries)} клетки и техните файлове!")
                     st.rerun()
 
     st.markdown("---")
-    st.subheader("🔍 Сортиран архив на клетките")
+    st.subheader("🔍 Сортиран архив на клетките (С преглед на Excel файлове)")
     
     df_batt_clean = df_batt[df_batt["Име на Папка/Батерия"].astype(str).str.strip() != ""].copy()
     
@@ -173,14 +181,37 @@ if menu == "📁 Папки: Клетки / Батерии & Сортиране"
             name_disp = row['Име на Папка/Батерия'] if row['Име на Папка/Батерия'] else "Без име"
             date_disp = row['Дата на сглобяване'] if row['Дата на сглобяване'] else "Няма дата"
             comp_disp = row['Тип клетка / Състав'] if row['Тип клетка / Състав'] else "Няма информация"
+            file_name = str(row.get('Оригинален Файл', '')).strip()
             
-            col_info, col_del = st.columns([6, 1])
+            col_info, col_file, col_del = st.columns([5, 2, 1])
             with col_info:
                 st.markdown(f"🔋 **{name_disp}** | 🧪 **{row['Химия (Li/Na)']}** | 📅 **{date_disp}** (Година: {row['Година']}) | ⚙️ **Състав:** {comp_disp}")
+            
+            with col_file:
+                # Бутон за изтегляне/отваряне на Excel файла от телефон или компютър
+                file_path = os.path.join(FILES_DIR, file_name) if file_name else ""
+                if file_name and os.path.exists(file_path):
+                    with open(file_path, "rb") as f:
+                        st.download_button(
+                            label=f"📥 Свали/Отвори Excel",
+                            data=f,
+                            file_name=file_name,
+                            mime="application/octet-stream",
+                            key=f"dl_{idx}"
+                        )
+                else:
+                    st.caption("Няма прикачен файл")
+                    
             with col_del:
                 if st.button("🗑️ Изтрий", key=f"del_cell_{idx}"):
                     df_batt_updated = df_batt.drop(idx)
                     df_batt_updated.to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
+                    # Изтриване и на файла, ако съществува
+                    if file_path and os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
                     st.success("Изтрито!")
                     st.rerun()
     else:
