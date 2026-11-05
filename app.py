@@ -81,9 +81,8 @@ menu = st.sidebar.radio("📋 Модули", [
 # 1. МОДУЛ: НОВ ЛАБОРАТОРЕН ОПИТ (ОФЛАЙН ЗАЩИТЕН)
 if menu == "📝 Нов Лабораторен Опит (ОФЛАЙН)":
     st.header("📝 Записване на Нов Опит (Офлайн режим)")
-    st.info("💡 Вси опити се записват веднага във файла 'experiments_v2.csv' на лаптопа ви.")
+    st.info(f"💡 Вси опити се записват локално на вашия лаптоп във файла:\n`{os.path.abspath(EXP_FILE)}`")
     
-    # Вземаме списък с наличните папки/клетки
     available_cells = []
     if not df_batt.empty and "Име на Папка/Батерия" in df_batt.columns:
         available_cells = [c for c in df_batt["Име на Папка/Батерия"].tolist() if str(c).strip() != ""]
@@ -126,7 +125,10 @@ if menu == "📝 Нов Лабораторен Опит (ОФЛАЙН)":
                 
                 df_exp_updated = pd.concat([df_exp, new_e], ignore_index=True)
                 df_exp_updated.to_csv(EXP_FILE, index=False, encoding='utf-8-sig')
-                st.success(f"✅ Опитът '{e_title}' бе успешно записан локално!")
+                
+                full_saved_path = os.path.abspath(EXP_FILE)
+                st.success(f"✅ Опитът '{e_title}' бе успешно записан!")
+                st.info(f"📍 Запазено в папка: `{full_saved_path}`")
                 st.rerun()
 
 # 2. МОДУЛ: ПАПКИ И БАТЕРИИ
@@ -157,6 +159,7 @@ elif menu == "📁 Папки: Клетки / Батерии & Сортиран�
                 }])
                 pd.concat([df_batt, new_b], ignore_index=True).to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
                 st.success(f"Клетката '{b_name}' бе запазена локално!")
+                st.info(f"📍 Запазено във файл: `{os.path.abspath(BATTERIES_FILE)}`")
                 st.rerun()
 
     with tab2:
@@ -186,6 +189,7 @@ elif menu == "📁 Папки: Клетки / Батерии & Сортиран�
                 imported_df = pd.DataFrame(new_entries)
                 pd.concat([df_batt, imported_df], ignore_index=True).drop_duplicates(subset=["Име на Папка/Батерия"]).to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
                 st.success("Успешно качени и запазени!")
+                st.info(f"📍 Файловете са запазени в папка: `{os.path.abspath(FILES_DIR)}`")
                 st.rerun()
 
     st.markdown("---")
@@ -227,6 +231,8 @@ elif menu == "📁 Папки: Клетки / Батерии & Сортиран�
                 if st.button("🗑️ Изтрий", key=f"del_cell_{idx}"):
                     df_batt.drop(idx).to_csv(BATTERIES_FILE, index=False, encoding='utf-8-sig')
                     st.rerun()
+    else:
+        st.info("Все още няма качени или създадени клетки.")
 
 # 3. МОДУЛ: АБРИН
 elif menu == "🔌 Абрин: Разпределение по Канали":
